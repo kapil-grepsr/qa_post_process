@@ -2,6 +2,6 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.get("/merge")
-async def merge_something():
-    return {"message": "Merged successfully!"}
+@router.get("/test")
+async def test_route():
+    return {"message": "working"}

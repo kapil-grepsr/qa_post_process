@@ -1,6 +1,6 @@
-// service.ts
-import { Router } from "next/navigation";
+import { CONCAT_API_URL } from "@/app/services/config";
 
+// service.ts
 export type FilesState = (File | null)[];
 
 // Initialize files array with n nulls
@@ -23,17 +23,38 @@ export function updateFile(files: FilesState, index: number, file: File | null):
   return updated;
 }
 
-// Simulate concatenation, returns a promise with the URL of the concatenated file
-export function simulateConcatenate(): Promise<string> {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve("/fake-concatenated-file.csv");
-    }, 1000);
+// Concatenate using backend FastAPI
+export async function concatenateFiles(files: FilesState): Promise<string> {
+  const formData = new FormData();
+
+  // Filter out null files
+  files.forEach((file) => {
+    if (file) {
+      formData.append('files', file);
+    }
   });
+
+  const res = await fetch(CONCAT_API_URL, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to concatenate files");
+  }
+
+  const blob = await res.blob();
+  console.log("Blob size:", blob.size);
+  const url = URL.createObjectURL(blob);
+  console.log("Download URL:", url);
+  return URL.createObjectURL(blob); // this gives us a blob URL for download
 }
 
 // Navigate to check duplicates page
-export function navigateToDuplicates(router: Router, concatenatedFileUrl: string | null) {
+
+export function navigateToDuplicates(router: any, concatenatedFileUrl: string | null) {
   if (!concatenatedFileUrl) return;
   router.push(`/post-process/duplicates?file=${encodeURIComponent(concatenatedFileUrl)}`);
 }
+

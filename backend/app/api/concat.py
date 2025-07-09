@@ -1,39 +1,54 @@
+from fastapi import File, UploadFile, HTTPException, APIRouter
 from fastapi.responses import StreamingResponse
-import tempfile
+from typing import List
+import pandas as pd
+import io
 
-@router.post("/concat")
-async def concat_csvs(
-    primary_column: str = Form(...),
-    files: List[UploadFile] = File(...)
-):
+router = APIRouter()
+
+@router.post("/")
+async def concat_csv(files: List[UploadFile] = File(...)):
     if len(files) < 2:
-        raise HTTPException(status_code=400, detail="At least two CSV files must be uploaded")
+        raise HTTPException(status_code=400, detail="Please upload at least two CSV files.")
 
-    dfs = []
+    dataframes = []
+    expected_columns = None
+
     for file in files:
-        if not file.filename.endswith(".csv"):
-            raise HTTPException(status_code=400, detail=f"File {file.filename} is not a CSV")
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail=f"Invalid file type: {file.filename}")
         try:
-            contents = await file.read()
-            df = pd.read_csv(io.BytesIO(contents))
+            content = await file.read()
+            df = pd.read_csv(io.BytesIO(content))
+
+            if expected_columns is None:
+                expected_columns = list(df.columns)
+            else:
+                if list(df.columns) != expected_columns:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Columns mismatch in file {file.filename}. "
+                            f"Expected columns: {expected_columns}, "
+                            f"but got: {list(df.columns)}"
+                        )
+                    )
+
+            dataframes.append(df)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error reading CSV {file.filename}: {str(e)}")
-        
-        if primary_column not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Primary column '{primary_column}' not found in {file.filename}")
+            raise HTTPException(status_code=400, detail=f"Error reading {file.filename}: {str(e)}")
 
-        df[primary_column] = df[primary_column].astype(str)
-        dfs.append(df)
+    try:
+        concatenated_df = pd.concat(dataframes, ignore_index=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error concatenating files: {str(e)}")
 
-    df_merged = pd.concat(dfs, axis=0)
+    output = io.StringIO()
+    concatenated_df.to_csv(output, index=False)
+    output.seek(0)
 
-    # Convert to CSV bytes
-    stream = io.StringIO()
-    df_merged.to_csv(stream, index=False)
-    stream.seek(0)
-
-    headers = {
-        "Content-Disposition": "attachment; filename=concatenated.csv"
-    }
-
-    return StreamingResponse(stream, media_type="text/csv", headers=headers)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=concatenated.csv"}
+    )

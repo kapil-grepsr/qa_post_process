@@ -10,14 +10,16 @@ import {
   initializeFiles,
   addFile,
   updateFile,
-  simulateConcatenate,
   navigateToDuplicates,
 } from "./service";
+import { CONCAT_API_URL } from "@/app/services/config";
 
 export default function ConcatPage() {
   const [fileCount, setFileCount] = useState(2);
-  const [files, setFiles] = useState(initializeFiles(2));
+  const [files, setFiles] = useState<(File | null)[]>(initializeFiles(2));
   const [concatenatedFileUrl, setConcatenatedFileUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleAddFile = () => {
@@ -30,17 +32,60 @@ export default function ConcatPage() {
     setFiles((prev) => updateFile(prev, index, file));
   };
 
+  // New: Send files to backend API
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = await simulateConcatenate();
-    setConcatenatedFileUrl(url);
+    setError(null);
+    setLoading(true);
+    setConcatenatedFileUrl(null);
+
+    try {
+      // Validate minimum files selected
+      const selectedFiles = files.filter((f) => f !== null) as File[];
+      if (selectedFiles.length < 2) {
+        setError("Please upload at least two CSV files.");
+        setLoading(false);
+        return;
+      }
+
+      // Prepare form data
+      const formData = new FormData();
+      selectedFiles.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      // Call your FastAPI backend (adjust URL as needed)
+      const response = await fetch(CONCAT_API_URL, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        // Try to parse error message from backend
+        const errorData = await response.json();
+        setError(errorData.detail || "Failed to concatenate files.");
+        setLoading(false);
+        return;
+      }
+
+      // Get CSV blob from response
+      const blob = await response.blob();
+
+      // Create a local URL for download
+      const url = URL.createObjectURL(blob);
+      setConcatenatedFileUrl(url);
+    } catch (err) {
+      setError("Unexpected error occurred.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const goToCheckDuplicates = () => {
     navigateToDuplicates(router, concatenatedFileUrl);
   };
 
-  const isProcessing = files.some((f) => f !== null);
+  const isProcessing = loading;
 
   return (
     <>
@@ -61,28 +106,43 @@ export default function ConcatPage() {
           ))}
         </div>
 
+        {error && (
+          <p className="text-red-600 font-semibold">{error}</p>
+        )}
+
         <div className="flex space-x-4">
           <Button
             onClick={handleAddFile}
             type="button"
             variant="outline"
             className="hover:bg-gray-100 transition-colors"
+            disabled={loading}
           >
             + Upload More
           </Button>
 
-          <Button type="submit" className="hover:bg-primary/90 transition-colors">
-            Concatenate
+          <Button
+            type="submit"
+            className="hover:bg-primary/90 transition-colors"
+            disabled={loading}
+          >
+            {loading ? "Processing..." : "Concatenate"}
           </Button>
         </div>
 
         {concatenatedFileUrl && (
           <div className="pt-4 space-y-2">
-            <a href={concatenatedFileUrl} download className="inline-block">
-              <Button className="hover:bg-green-600 transition-colors">
-                Download Concatenated File
+              <Button
+                      onClick={() => {
+                      const a = document.createElement('a');
+                      a.href = concatenatedFileUrl;
+                      a.download = 'concatenated.csv';
+                      a.click();
+                    }}
+                  >
+                    Download Concatenated File
               </Button>
-            </a>
+
 
             <Button
               type="button"
